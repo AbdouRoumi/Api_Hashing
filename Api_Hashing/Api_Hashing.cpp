@@ -117,6 +117,7 @@ FARPROC CustomGetProcProcess(IN HMODULE hModule, DWORD dwApiNameHash) {
 }
 
 HMODULE GetModuleHandleH(DWORD dwModuleNameHash) {
+
 	if (dwModuleNameHash == NULL)
 		return NULL;
 
@@ -126,18 +127,16 @@ HMODULE GetModuleHandleH(DWORD dwModuleNameHash) {
 	PPEB					pPeb = (PEB*)(__readfsdword(0x30));
 #endif
 
-	PLDR_DATA_TABLE_ENTRY	pDte = (PLDR_DATA_TABLE_ENTRY)(pPeb->Ldr->InMemoryOrderModuleList.Flink);
-
-	// getting the head of the linked list ( used to get the node & to check the end of the list)
-	PLIST_ENTRY				pListHead = (PLIST_ENTRY)&pPeb->Ldr->InMemoryOrderModuleList;
-	// getting the node of the linked list
-	PLIST_ENTRY				pListNode = (PLIST_ENTRY)pListHead->Flink;
+	PPEB_LDR_DATA			pLdr = (PPEB_LDR_DATA)(pPeb->Ldr);
+	PLDR_DATA_TABLE_ENTRY	pDte = (PLDR_DATA_TABLE_ENTRY)(pLdr->InMemoryOrderModuleList.Flink);
 
 	while (pDte) {
 
 		if (pDte->FullDllName.Length != NULL && pDte->FullDllName.Length < MAX_PATH) {
 
+			// converting `FullDllName.Buffer` to upper case string 
 			CHAR UpperCaseDllName[MAX_PATH];
+
 			DWORD i = 0;
 			while (pDte->FullDllName.Buffer[i]) {
 				UpperCaseDllName[i] = (CHAR)toupper(pDte->FullDllName.Buffer[i]);
@@ -145,20 +144,21 @@ HMODULE GetModuleHandleH(DWORD dwModuleNameHash) {
 			}
 			UpperCaseDllName[i] = '\0';
 
-
-			//Hashing the dll name and comparing it to the input hash
-
+			// hashing `UpperCaseDllName` and comparing the hash value to that's of the input `dwModuleNameHash`
 			if (HASHA(UpperCaseDllName) == dwModuleNameHash)
 				return (HMODULE)pDte->Reserved2[0];
 
 		}
-		else
-		{
+		else {
 			break;
 		}
+
+		pDte = *(PLDR_DATA_TABLE_ENTRY*)(pDte);
 	}
 
+	return NULL;
 }
+
 
 
 typedef int (WINAPI* fnMessageBoxA)(
@@ -171,20 +171,41 @@ typedef int (WINAPI* fnMessageBoxA)(
 
 
 int main() {
-	HMODULE hUser32 = GetModuleHandleA("user32.dll");
-	if (hUser32 == NULL) {
-		printf("[-] Failed to get handle to user32.dll\n");
+	//Load user32.dll
+
+	if (LoadLibraryA("USER32.DLL") == NULL) {
+		printf("[!] LoadLibraryA Failed With Error : %d \n",
+			GetLastError());
+		return 0;
+	}
+
+	//Get handle to user32.dll using hash function
+
+	HMODULE hUser32 = GetModuleHandleH(USER32DLL_HASH);
+
+
+	if(hUser32 == NULL) {
+		printf("[-] Failed to get handle to User32.dll\n");
 		return -1;
 	}
 
-	FARPROC pMessageBoxA = CustomGetProcProcess(hUser32, MessageBoxA_HASH);
-	if (pMessageBoxA == NULL) {
-		printf("[-] Failed to get handle to MessageBoxA\n");
+	printf("hey");
+	
+	//Getting msgBox Address using hash function
+
+	fnMessageBoxA MsgBox = (fnMessageBoxA)CustomGetProcProcess(hUser32, MessageBoxA_HASH);
+	if (MsgBox == NULL) {
+		printf("[-] Failed to find MessageBoxA Adress\n");
 		return -1;
 	}
 
-	MessageBoxA(NULL, "Hello World!", "Hello", MB_OK);
 
+	//Calling msgBox
+
+	MsgBox(NULL, "Hello ELB1g", "Hello", MB_OK);
+
+	printf("Press <Enter> To Quit ... ");
+	getchar();
 	return 0;
 }
 
